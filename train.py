@@ -5,12 +5,13 @@ from trainer import Trainer
 device = 'cuda:0'
 
 base_model = HookedTransformer.from_pretrained(
-    "gemma-2-2b", 
+    "Qwen/Qwen2.5-1.5B", 
     device=device, 
 )
 
 chat_model = HookedTransformer.from_pretrained(
-    "gemma-2-2b-it", 
+    "deepseek-ai/DeepSeek-R1-Distill-Qwen-1.5B", 
+    trust_remote_code=True
     device=device, 
 )
 
