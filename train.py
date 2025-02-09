@@ -11,7 +11,7 @@ base_model = HookedTransformer.from_pretrained(
 
 chat_model = HookedTransformer.from_pretrained(
     "deepseek-ai/DeepSeek-R1-Distill-Qwen-1.5B", 
-    trust_remote_code=True
+    trust_remote_code=True,
     device=device, 
 )
 
