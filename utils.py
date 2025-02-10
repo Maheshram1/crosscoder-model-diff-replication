@@ -198,7 +198,7 @@ def load_pile_lmsys_mixed_tokens():
 def load_pile_chat_tokens():
     try:
         print("Loading data from disk")
-        all_tokens = torch.load("/workspace/data/pile-chat-qwen-tokenized.pt")
+        all_tokens = torch.load("pile-chat-qwen-tokenized.pt")
     except:
         print("Data not cached. Loading from HuggingFace")
         data = load_dataset(
@@ -212,7 +212,7 @@ def load_pile_chat_tokens():
         all_tokens = data["input_ids"]
         
         # Cache the data locally
-        torch.save(all_tokens, "/workspace/data/pile-chat-qwen-tokenized.pt")
+        torch.save(all_tokens, "pile-chat-qwen-tokenized.pt")
         print("Saved tokens to disk")
     
     return all_tokens
