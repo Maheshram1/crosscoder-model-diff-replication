@@ -110,6 +110,181 @@ class Buffer:
         self.pointer += self.cfg["batch_size"]
         if self.pointer > self.buffer.shape[0] // 2 - self.cfg["batch_size"]:
             self.refresh()
+
+# from utils import *
+# from transformer_lens import ActivationCache
+# import tqdm
+# import torch
+# import einops
+# import numpy as np
+
+# class Buffer:
+#     """
+#     This defines a data buffer to store a stack of activations across both models that can be used 
+#     to train the autoencoder. It automatically runs the model to generate more when it gets halfway empty.
+#     """
+
+#     def __init__(self, cfg, model_A, model_B, all_tokens):
+#         assert model_A.cfg.d_model == model_B.cfg.d_model
+#         self.cfg = cfg
+#         # Calculate buffer size that's compatible with both batch_size and sequence length
+#         self.seq_len = cfg["seq_len"] - 1  # Accounting for dropping BOS token
+#         self.buffer_size = cfg["batch_size"] * cfg["buffer_mult"]
+#         # Ensure buffer_size is divisible by sequence length
+#         self.buffer_batches = self.buffer_size // self.seq_len
+#         self.buffer_size = self.buffer_batches * self.seq_len
+        
+#         print(f"Initializing buffer with size {self.buffer_size}")
+        
+#         self.buffer = torch.zeros(
+#             (self.buffer_size, 2, model_A.cfg.d_model),
+#             dtype=torch.bfloat16,
+#             requires_grad=False,
+#         ).to(cfg["device"])
+        
+#         self.model_A = model_A
+#         self.model_B = model_B
+#         self.token_pointer = 0
+#         self.first = True
+#         self.normalize = True
+#         self.all_tokens = all_tokens
+        
+#         print("Estimating normalization factors...")
+#         estimated_norm_scaling_factor_A = self.estimate_norm_scaling_factor(cfg["model_batch_size"], model_A)
+#         estimated_norm_scaling_factor_B = self.estimate_norm_scaling_factor(cfg["model_batch_size"], model_B)
+        
+#         self.normalisation_factor = torch.tensor(
+#             [estimated_norm_scaling_factor_A, estimated_norm_scaling_factor_B],
+#             device="cuda:0",
+#             dtype=torch.float32,
+#         )
+#         self.refresh()
+
+#     @torch.no_grad()
+#     def estimate_norm_scaling_factor(self, batch_size, model, n_batches_for_norm_estimate: int = 100):
+#         """
+#         Estimate the normalization factor for model activations.
+#         Based on SAELens implementation.
+#         """
+#         norms_per_batch = []
+#         for i in tqdm.tqdm(
+#             range(n_batches_for_norm_estimate), 
+#             desc="Estimating norm scaling factor"
+#         ):
+#             tokens = self.all_tokens[i * batch_size : (i + 1) * batch_size]
+#             _, cache = model.run_with_cache(
+#                 tokens,
+#                 names_filter=self.cfg["hook_point"],
+#                 return_type=None,
+#             )
+#             acts = cache[self.cfg["hook_point"]]
+#             norms_per_batch.append(acts.norm(dim=-1).mean().item())
+        
+#         mean_norm = np.mean(norms_per_batch)
+#         scaling_factor = np.sqrt(model.cfg.d_model) / mean_norm
+#         return scaling_factor
+
+#     @torch.no_grad()
+#     def refresh(self):
+#         """
+#         Refresh the buffer by running the models on new data.
+#         On first run, fills the entire buffer.
+#         On subsequent runs, fills half the buffer.
+#         """
+#         self.pointer = 0
+#         print("Refreshing the buffer!")
+        
+#         with torch.autocast("cuda", torch.bfloat16):
+#             # Calculate actual size we'll fill
+#             if self.first:
+#                 target_size = self.buffer_size
+#                 self.first = False
+#             else:
+#                 target_size = self.buffer_size // 2
+            
+#             acts_stored = 0
+#             pbar = tqdm.trange(0, target_size, self.cfg["model_batch_size"])
+            
+#             for _ in pbar:
+#                 # Calculate how many samples we can process in this batch
+#                 space_left = target_size - acts_stored
+#                 current_batch_size = min(
+#                     self.cfg["model_batch_size"],
+#                     space_left // (self.seq_len) + 1
+#                 )
+                
+#                 # Get tokens for current batch
+#                 tokens = self.all_tokens[
+#                     self.token_pointer : self.token_pointer + current_batch_size
+#                 ]
+                
+#                 if tokens.shape[0] == 0:
+#                     print("Reached end of tokens")
+#                     break
+                
+#                 # Run both models and get activations
+#                 _, cache_A = self.model_A.run_with_cache(
+#                     tokens, names_filter=self.cfg["hook_point"]
+#                 )
+#                 _, cache_B = self.model_B.run_with_cache(
+#                     tokens, names_filter=self.cfg["hook_point"]
+#                 )
+
+#                 # Stack activations from both models
+#                 acts = torch.stack(
+#                     [cache_A[self.cfg["hook_point"]], cache_B[self.cfg["hook_point"]]], 
+#                     dim=0
+#                 )
+#                 acts = acts[:, :, 1:, :]  # Drop BOS token
+                
+#                 # Reshape activations
+#                 acts = einops.rearrange(
+#                     acts,
+#                     "n_layers batch seq_len d_model -> (batch seq_len) n_layers d_model",
+#                 )
+                
+#                 # Store activations in buffer
+#                 space_left = target_size - acts_stored
+#                 acts_to_store = min(acts.shape[0], space_left)
+                
+#                 if acts_to_store <= 0:
+#                     break
+                    
+#                 self.buffer[acts_stored:acts_stored + acts_to_store] = acts[:acts_to_store]
+#                 acts_stored += acts_to_store
+#                 self.token_pointer += current_batch_size
+                
+#                 pbar.set_description(f"Stored {acts_stored}/{target_size} activations")
+                
+#                 if acts_stored >= target_size:
+#                     break
+
+#         # Randomize the buffer
+#         self.pointer = 0
+#         self.buffer = self.buffer[
+#             torch.randperm(self.buffer.shape[0]).to(self.cfg["device"])
+#         ]
+        
+#         print(f"Buffer refreshed with {acts_stored} activations")
+
+#     @torch.no_grad()
+#     def next(self):
+#         """
+#         Get the next batch of activations from the buffer.
+#         Automatically refreshes the buffer when it's half empty.
+#         """
+#         out = self.buffer[self.pointer : self.pointer + self.cfg["batch_size"]].float()
+#         self.pointer += self.cfg["batch_size"]
+        
+#         # Refresh when buffer is half empty
+#         if self.pointer > self.buffer.shape[0] // 2 - self.cfg["batch_size"]:
+#             self.refresh()
+            
+#         # Apply normalization if enabled
+#         if self.normalize:
+#             out = out * self.normalisation_factor[None, :, None]
+            
+#         return out
         if self.normalize:
             out = out * self.normalisation_factor[None, :, None]
         return out
