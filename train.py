@@ -16,7 +16,8 @@ chat_model = HookedTransformer.from_pretrained(
 )
 
 # %%
-all_tokens = load_pile_lmsys_mixed_tokens()
+# all_tokens = load_pile_lmsys_mixed_tokens()
+all_tokens = load_pile_chat_tokens()
 
 # %%
 default_cfg = {
